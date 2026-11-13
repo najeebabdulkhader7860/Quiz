@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Join the quiz</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ink:#0E2238; --paper:#163654; --paper2:#1C4268; --grid:rgba(156,195,232,.10);
+  --line:#9CC3E8; --text:#F2F6FA; --muted:#A9BDD2;
+  --o0:#D9502A; --o1:#D9930F; --o2:#24895B; --o3:#6E52A3; --gold:#F2C14E; --ok:#3DBE7E; --bad:#E0573B;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  font-family:"Archivo","Segoe UI",system-ui,-apple-system,Roboto,Arial,sans-serif;
+  color:var(--text); background-color:var(--paper);
+  background-image:linear-gradient(var(--grid) 1px,transparent 1px),linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:32px 32px; font-variant-numeric:tabular-nums;
+}
+button{font:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid var(--gold);outline-offset:3px}
+.shape{display:inline-block;width:1.4em;text-align:center;margin-right:.35em}
+.o0{background:var(--o0)}.o1{background:var(--o1)}.o2{background:var(--o2)}.o3{background:var(--o3)}
+.btn{background:var(--gold);color:var(--ink);border:0;border-radius:6px;padding:.75em 1.6em;font-weight:800;font-size:1.1rem}
+.btn[disabled]{opacity:.4;cursor:not-allowed}
+.muted{color:var(--muted)}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+body{min-height:100vh;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)}
+.wrap{max-width:520px;margin:0 auto;padding:20px;min-height:100vh;display:flex;flex-direction:column}
+.top{display:flex;justify-content:space-between;color:var(--muted);font-size:.95rem;margin-bottom:10px}
+.top b{color:var(--text)}
+h1{font-size:1.6rem;line-height:1.2;margin:8px 0 16px;font-weight:800}
+.center{flex:1;display:flex;flex-direction:column;justify-content:center;text-align:center}
+.big{font-size:2.4rem;font-weight:900;margin:8px 0}
+label{display:block;font-weight:600;margin:16px 0 6px;text-align:left}
+input{width:100%;font:inherit;font-size:1.2rem;padding:14px;border-radius:6px;border:2px solid var(--line);background:var(--ink);color:var(--text)}
+.full{width:100%;margin-top:22px}
+.timer{height:6px;background:rgba(156,195,232,.25);border-radius:3px;overflow:hidden;margin-bottom:14px}
+.timer i{display:block;height:100%;background:var(--gold);width:100%}
+.answers{display:grid;gap:12px;margin-top:auto}
+.ans{border:0;border-radius:8px;color:#fff;padding:18px 16px;font-size:1.15rem;font-weight:700;text-align:left;display:flex;align-items:center;min-height:70px}
+.ans:active{transform:scale(.98)}
+.chosen{display:inline-flex;align-items:center;justify-content:center;width:84px;height:84px;border-radius:10px;font-size:2.4rem;margin:0 auto 10px;color:#fff}
+.res{border-radius:10px;padding:26px 18px;margin-bottom:16px}
+.res.ok{background:var(--ok);color:var(--ink)}
+.res.bad{background:var(--bad)}
+.res.none{background:var(--paper2)}
+.pill{display:inline-block;background:var(--paper2);border:1px solid rgba(156,195,232,.4);border-radius:4px;padding:10px 14px;margin-top:8px}
+.medal{font-size:4rem}
+.err{color:#FFB4A3;margin-top:12px;min-height:1.2em}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+/* PASTE THE SAME FIREBASE CONFIG AS IN host.html */
+const firebaseConfig = {
+  apiKey: "AIzaSyDKv_MoPpL_HyYWX4lGUkREkZDSxf1M-Hg",
+  authDomain: "knowledge-sharing-quiz.firebaseapp.com",
+  databaseURL: "https://knowledge-sharing-quiz-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "knowledge-sharing-quiz",
+  storageBucket: "knowledge-sharing-quiz.firebasestorage.app",
+  messagingSenderId: "466280712475",
+  appId: "1:466280712475:web:588cc0b4b7489855adebbe",
+  measurementId: "G-751Y8EGKC1"
+};
+
+const SHAPES = ["▲", "◆", "●", "■"];
+const $app = document.getElementById("app");
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const store = { get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+                set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+let offset = 0;
+db.ref(".info/serverTimeOffset").on("value", s => { offset = s.val() || 0; });
+const now = () => Date.now() + offset;
+
+let code = (new URLSearchParams(location.search).get("g") || "").replace(/\D/g, "");
+let me = null, G = null, st = null, players = {}, chosen = {}, lateMsg = "", raf = 0;
+
+function joinForm(err = "") {
+  $app.innerHTML = `<div class="center">
+    <div class="big">Join the quiz</div>
+    <label for="pin">Game PIN</label>
+    <input id="pin" inputmode="numeric" autocomplete="off" maxlength="6" value="${esc(code)}">
+    <label for="nm">Your name</label>
+    <input id="nm" maxlength="24" autocomplete="name" placeholder="e.g. Priya – Design">
+    <button class="btn full" id="jb">Join</button>
+    <p class="err" role="alert">${esc(err)}</p></div>`;
+  const nm = document.getElementById("nm");
+  (code ? nm : document.getElementById("pin")).focus();
+  document.getElementById("jb").onclick = join;
+  nm.onkeydown = e => { if (e.key === "Enter") join(); };
+}
+
+async function join() {
+  const pin = document.getElementById("pin").value.replace(/\D/g, "");
+  const name = document.getElementById("nm").value.trim().replace(/\s+/g, " ");
+  if (pin.length !== 6) return joinForm("Enter the 6-digit PIN shown on the main screen.");
+  if (!name) { code = pin; return joinForm("Enter your name so it can appear on the leaderboard."); }
+  document.getElementById("jb").disabled = true;
+  const s = await db.ref("games/" + pin + "/state").once("value");
+  if (!s.exists()) { code = pin; return joinForm("No game with that PIN. Check the main screen."); }
+  const pid = db.ref().push().key;
+  await db.ref(`games/${pin}/players/${pid}`).set({ name, score: 0 });
+  code = pin; me = { pid, name };
+  store.set("quiz_" + pin, me);
+  connect();
+}
+
+function connect() {
+  G = db.ref("games/" + code);
+  G.child("state").on("value", s => { st = s.val(); lateMsg = ""; render(); });
+  G.child("players").on("value", s => { players = s.val() || {}; if (st && st.phase !== "question") render(); });
+}
+
+const rankOf = () => {
+  const list = Object.entries(players).map(([pid, p]) => ({ pid, name: p.name || "", score: p.score || 0 }))
+    .sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+  return { rank: list.findIndex(p => p.pid === me.pid) + 1, total: list.length };
+};
+const mine = () => players[me.pid] || { score: 0 };
+const top = q => `<div class="top"><span>${esc(me.name)}</span><span>${q}</span></div>`;
+
+function render() {
+  cancelAnimationFrame(raf);
+  if (!st) { $app.innerHTML = `<div class="center"><div class="big">Game ended</div><p class="muted">The host has closed this game.</p></div>`; return; }
+  const qLabel = st.q != null ? `Question <b>${st.q + 1}</b> of ${st.total}` : "";
+  const p = mine(), { rank, total } = rankOf();
+
+  if (st.phase === "lobby") {
+    $app.innerHTML = top("") + `<div class="center"><div class="big">You’re in!</div>
+      <p>Watch the main screen. The first question will appear here.</p>
+      <p class="pill">${total} ${total === 1 ? "player" : "players"} joined</p></div>`;
+  }
+  else if (st.phase === "question") {
+    const c = chosen[st.q];
+    if (c != null) {
+      $app.innerHTML = top(qLabel) + `<div class="center">
+        <div class="chosen o${c}">${SHAPES[c]}</div>
+        <div class="big">${lateMsg ? "Time’s up" : "Answer locked in"}</div>
+        <p class="muted">${lateMsg || "Waiting for everyone else…"}</p></div>`;
+      return;
+    }
+    $app.innerHTML = top(qLabel) + `<div class="timer"><i id="tb"></i></div>
+      <h1>${esc(st.text)}</h1>
+      <div class="answers">${st.options.map((o, k) =>
+        `<button class="ans o${k}" data-k="${k}"><span class="shape" aria-hidden="true">${SHAPES[k]}</span>${esc(o)}</button>`).join("")}</div>`;
+    document.querySelectorAll(".ans").forEach(b => b.onclick = () => answer(+b.dataset.k));
+    const dur = st.endsAt - st.startedAt;
+    const tickP = () => {
+      const left = Math.max(0, st.endsAt - now());
+      const tb = document.getElementById("tb");
+      if (tb) tb.style.width = (100 * left / dur) + "%";
+      if (left > 0) raf = requestAnimationFrame(tickP);
+    };
+    tickP();
+    G.child(`answers/${st.q}/${me.pid}`).once("value").then(s => {
+      if (s.exists() && chosen[st.q] == null && st.phase === "question") { chosen[st.q] = s.val().c; render(); }
+    });
+  }
+  else if (st.phase === "reveal") {
+    const l = p.last && p.last.q === st.q ? p.last : null;
+    const cls = !l || !l.answered ? "none" : l.ok ? "ok" : "bad";
+    const head = !l || !l.answered ? "No answer" : l.ok ? "✓ Correct" : "✗ Not this time";
+    $app.innerHTML = top(qLabel) + `<div class="center">
+      <div class="res ${cls}"><div class="big">${head}</div>${l && l.ok ? `<div style="font-size:1.4rem;font-weight:800">+${l.pts} points</div>` : ""}</div>
+      <p class="muted" style="margin:0">Correct answer</p>
+      <p style="font-size:1.3rem;font-weight:800;margin:4px 0 16px">${SHAPES[st.correct]} ${esc(st.options[st.correct])}</p>
+      <p class="pill">${p.score} points · #${rank} of ${total}</p></div>`;
+  }
+  else if (st.phase === "leaderboard") {
+    $app.innerHTML = top(qLabel) + `<div class="center"><p class="muted">Your position</p>
+      <div class="big">#${rank} <span class="muted" style="font-size:1.2rem">of ${total}</span></div>
+      <p class="pill">${p.score} points</p></div>`;
+  }
+  else if (st.phase === "podium") {
+    const medal = ["", "🥇", "🥈", "🥉"][rank] || "";
+    $app.innerHTML = top("Final results") + `<div class="center">
+      ${medal ? `<div class="medal">${medal}</div>` : ""}
+      <div class="big">${rank === 1 ? "You won!" : `You finished #${rank}`}</div>
+      <p class="pill">${p.score} points · ${total} players</p>
+      <p class="muted">Thanks for playing.</p></div>`;
+  }
+}
+
+async function answer(k) {
+  if (!st || st.phase !== "question" || chosen[st.q] != null) return;
+  const q = st.q;
+  chosen[q] = k; render();
+  try {
+    await G.child(`answers/${q}/${me.pid}`).set({ c: k, t: firebase.database.ServerValue.TIMESTAMP });
+  } catch (e) {
+    if (st && st.q === q) { lateMsg = "That answer arrived after the timer ended, so it didn’t count."; render(); }
+  }
+}
+
+const saved = code ? store.get("quiz_" + code) : null;
+if (saved && saved.pid) {
+  db.ref(`games/${code}/players/${saved.pid}`).once("value").then(s => {
+    if (s.exists()) { me = saved; connect(); } else joinForm();
+  });
+} else joinForm();
+</script>
+</body>
+</html>
